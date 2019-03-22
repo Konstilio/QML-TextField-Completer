@@ -5,15 +5,17 @@ import QtQuick.Controls 2.3
 TextField {
     id: _textFieldWithCompleterRoot
     property var completerModel // model of completer, works with Display Role so far
-    property int popupWidth: width // width of completer popup
-    property int popupPadding: 2 // padding of completer popup
+    property int popupPadding: 0 // padding of completer popup
     property string endOfWord: "~!#$%^&*()_+{}|:\"<>?,./;'[]\\-=\n " // all characters that represents end of word
 
-    property Component completerDelegate : MenuItem {
-        text: itemName
+    signal textModified(); // This signal is emitted whenever the text is edited. Or changed because of completer selection.
+    signal completerPrefixChanged(var prefixText); // This signal is emitted when completer prefix is changed, before invoking the popup. This is good place to filter the model according to prefixText.
+
+    property Component completerRowDelegate : MenuItem {
+        text: rowText
         width: contentWidth
         background: Rectangle {
-            color : (pressed ? "lightblue" : (bCurrentItem ? "blue" : "white"))
+            color : (pressed ? _privatePallete.mid : (bCurrentRow ? _privatePallete.highlight : _privatePallete.window))
         }
 
         onTriggered: {
@@ -23,7 +25,7 @@ TextField {
 
     property Component completerBackgroundDelegate: Rectangle {
         border.width: _textFieldWithCompleterRoot.popupPadding
-        color: "white"
+        color: _privatePallete.window
         border.color: "black"
         height: contentHeight
         width: contentWidth
@@ -33,6 +35,17 @@ TextField {
         id: _private
         property var popupWindow: null
         property int startPos: -1
+    }
+
+    Text {
+        id: _privateMetrics
+        visible: false
+        font: _textFieldWithCompleterRoot.font
+    }
+
+    SystemPalette {
+        id: _privatePallete
+        colorGroup: SystemPalette.Active
     }
 
     Keys.onUpPressed: {
@@ -61,21 +74,21 @@ TextField {
 
         Menu {
             id: _completerMenu
-            width:_textFieldWithCompleterRoot.popupWidth
             property var menuModel
             property var modelDelegate
             padding: _textFieldWithCompleterRoot.popupPadding
             contentItem: ListView {
                 id: _contentItem
                 model: _completerMenu.menuModel
-                width:_textFieldWithCompleterRoot.popupWidth
+                width: contentWidth
+                height: contentHeight
 
                 delegate: Loader {
-                    property var itemName: model.display
-                    property int itemIndex: model.index
-                    property bool  bCurrentItem: itemIndex == _contentItem.currentIndex
+                    property var rowText: model.display
+                    property int rowIndex: model.index
+                    property bool  bCurrentRow: rowIndex == _contentItem.currentIndex
                     property int contentWidth: _contentItem.width
-                    sourceComponent: _textFieldWithCompleterRoot.completerDelegate
+                    sourceComponent: _textFieldWithCompleterRoot.completerRowDelegate
                 }
             }
 
@@ -101,10 +114,12 @@ TextField {
 
     onTextEdited: {
         var filterText = getWord(text, cursorPosition);
-        console.log("filterText = " + filterText);
+
+        _textFieldWithCompleterRoot.textModified();
+        _textFieldWithCompleterRoot.completerPrefixChanged(filterText);
+
         if (_private.popupWindow)
         {
-            completerModel.setFilterWildcard(filterText + '*');
             if (completerModel.rowCount() === 0 || filterText.length < 2)
             {
                 _private.popupWindow.close();
@@ -112,7 +127,9 @@ TextField {
             }
             else
             {
-                _private.popupWindow.popup(parent, Qt.point(_textFieldWithCompleterRoot.x, _textFieldWithCompleterRoot.height));
+                _privateMetrics.text = text.substring(0, _private.startPos);
+                _private.popupWindow.popup(parent,
+                    Qt.point(_textFieldWithCompleterRoot.x + _textFieldWithCompleterRoot.leftPadding + _privateMetrics.implicitWidth, _textFieldWithCompleterRoot.height));
                 _textFieldWithCompleterRoot.forceActiveFocus();
             }
         }
@@ -134,11 +151,11 @@ TextField {
         if (_private.startPos == -1 || _private.startPos >= text.length)
             return;
 
-        console.log("completeText = " + completeText + " pos = " + _private.startPos)
         var oldText = _textFieldWithCompleterRoot.text;
         _textFieldWithCompleterRoot.text = oldText.substring(0, _private.startPos) + completeText + oldText.substring(cursorPosition, oldText.length) + ' '
         _textFieldWithCompleterRoot.cursorPosition = _private.startPos + completeText.length + 1 // set cursor position
         _private.startPos = -1
+        _textFieldWithCompleterRoot.textModified();
 
         if (_private.popupWindow)
             _private.popupWindow.close();
@@ -147,7 +164,6 @@ TextField {
     function getWord(text, position)
     {
          _private.startPos = -1;
-        console.log("getWord position: " + position)
         if (position > text.length)
             return "";
 
@@ -156,7 +172,6 @@ TextField {
         {
             if (endOfWord.indexOf(text.charAt(iPos)) > -1)
             {
-                console.log("getWord endOfWord: " + text.charAt(iPos))
                 break;
             }
         }
@@ -165,7 +180,6 @@ TextField {
         if (iPos >= position)
             return "";
 
-        console.log("getWord iPos: " + iPos)
         _private.startPos = iPos;
         return text.substring(iPos, position);
     }
